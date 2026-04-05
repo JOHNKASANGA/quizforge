@@ -1,0 +1,181 @@
+// prisma/schema.prisma
+// Run: npx prisma db push && npx prisma generate
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// AUTH
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?   // null for OAuth users
+  role          Role      @default(STUDENT)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  scores        Score[]
+  questionBanks QuestionBank[]
+
+  @@index([email])
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────
+// QUESTION BANK
+// ─────────────────────────────────────────────────────────────
+
+model QuestionBank {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  sourceFile  String?  // original filename
+  sourceType  String?  // "pdf" | "docx" | "txt" | "manual" | "csv"
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy  User       @relation(fields: [createdById], references: [id])
+  questions  Question[]
+  tests      Test[]
+
+  @@index([createdById])
+}
+
+model Question {
+  id            String       @id @default(cuid())
+  bankId        String
+  text          String       @db.Text
+  type          QuestionType
+  options       Json?        // string[] for MCQ/TF, null for SA
+  correctAnswer String       // index as string for MCQ/TF, answer text for SA
+  explanation   String?      @db.Text
+  category      String?
+  difficulty    Int          @default(2) // 1=Easy 2=Medium 3=Hard
+  aiGenerated   Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+
+  bank          QuestionBank   @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  testQuestions TestQuestion[]
+
+  @@index([bankId])
+  @@index([type])
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+// ─────────────────────────────────────────────────────────────
+// TESTS
+// ─────────────────────────────────────────────────────────────
+
+model Test {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  bankId        String
+  timeLimitSecs Int      @default(1800) // 30 min
+  passMark      Int      @default(60)   // percentage
+  isPublished   Boolean  @default(false)
+  shuffleQs     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  bank          QuestionBank   @relation(fields: [bankId], references: [id])
+  testQuestions TestQuestion[]
+  scores        Score[]
+
+  @@index([bankId])
+}
+
+model TestQuestion {
+  id         String   @id @default(cuid())
+  testId     String
+  questionId String
+  order      Int
+
+  test     Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([testId, order])
+  @@index([testId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// SCORES
+// ─────────────────────────────────────────────────────────────
+
+model Score {
+  id              String   @id @default(cuid())
+  userId          String
+  testId          String
+  answers         Json     // Record<questionId, userAnswer>
+  correctCount    Int
+  totalQuestions  Int
+  percentage      Float
+  passed          Boolean
+  timeTakenSecs   Int
+  tabSwitchCount  Int      @default(0)
+  submittedAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  test Test @relation(fields: [testId], references: [id])
+
+  @@index([userId])
+  @@index([testId])
+  @@index([submittedAt])
+}
